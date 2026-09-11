@@ -1,12 +1,13 @@
 /**
  * NARUTO STICKMAN - ARENA FIGHTER
- * Game Loop + Canvas Implementation
+ * Player + Movement System
  * 
  * OBJECTIVE:
- * - Create basic game structure with Canvas
- * - Implement continuous game loop
- * - Display arena with floor
- * - Render single stickman character
+ * - Create a playable character with physics
+ * - Implement horizontal movement (A/D, arrows)
+ * - Implement jump mechanics (W, up arrow, space)
+ * - Apply gravity and ground detection
+ * - Render player stickman with direction awareness
  */
 
 // ============================================================================
@@ -49,35 +50,122 @@ const ARENA = {
     groundY: canvas.height - 80,
 };
 
-const STICKMAN = {
-    x: canvas.width / 2,
-    y: ARENA.groundY - 60,
-    width: 30,
-    height: 60,
-    color: '#ff6b6b',
+const PHYSICS = {
+    gravity: 0.6,
+    friction: 0.85,
+    maxFallSpeed: 15,
 };
 
 // ============================================================================
-// STICKMAN CLASS
+// PLAYER CLASS
 // ============================================================================
 
-class Stickman {
+class Player {
     constructor(x, y) {
+        // Position
         this.x = x;
         this.y = y;
+
+        // Dimensions
         this.width = 30;
         this.height = 60;
+
+        // Velocity
+        this.velocityX = 0;
+        this.velocityY = 0;
+
+        // Physics
+        this.speed = 5;          // Horizontal movement speed
+        this.jumpForce = 12;     // Jump strength
+        this.gravity = PHYSICS.gravity;
+
+        // State
+        this.grounded = false;
+        this.isJumping = false;
+        this.direction = 1;     // 1 = right, -1 = left
+
+        // Visual
         this.color = '#ff6b6b';
-        this.vx = 0;
-        this.vy = 0;
     }
 
     /**
-     * Draw stickman on canvas
+     * Handle input from keyboard
+     */
+    handleInput(keys) {
+        // Horizontal movement
+        if (keys['a'] || keys['arrowleft']) {
+            this.velocityX = -this.speed;
+            this.direction = -1;
+        } else if (keys['d'] || keys['arrowright']) {
+            this.velocityX = this.speed;
+            this.direction = 1;
+        } else {
+            // Stop when no key is pressed
+            this.velocityX = 0;
+        }
+
+        // Jump - only when grounded
+        if ((keys['w'] || keys['arrowup'] || keys[' ']) && this.grounded && !this.isJumping) {
+            this.velocityY = -this.jumpForce;
+            this.isJumping = true;
+            this.grounded = false;
+        }
+    }
+
+    /**
+     * Update player state (physics)
+     */
+    update() {
+        // Apply gravity
+        if (!this.grounded) {
+            this.velocityY += this.gravity;
+
+            // Cap fall speed
+            if (this.velocityY > PHYSICS.maxFallSpeed) {
+                this.velocityY = PHYSICS.maxFallSpeed;
+            }
+        }
+
+        // Apply velocity to position
+        this.x += this.velocityX;
+        this.y += this.velocityY;
+
+        // Arena boundary collision (left and right)
+        const minX = ARENA.padding;
+        const maxX = ARENA.width - ARENA.padding - this.width;
+
+        if (this.x < minX) {
+            this.x = minX;
+            this.velocityX = 0;
+        }
+        if (this.x > maxX) {
+            this.x = maxX;
+            this.velocityX = 0;
+        }
+
+        // Ground collision
+        const groundY = ARENA.groundY;
+        if (this.y + this.height >= groundY) {
+            this.y = groundY - this.height;
+            this.velocityY = 0;
+            this.grounded = true;
+            this.isJumping = false;
+        } else {
+            this.grounded = false;
+        }
+    }
+
+    /**
+     * Draw player stickman on canvas
      */
     draw(ctx) {
         ctx.save();
-        ctx.translate(this.x, this.y);
+        ctx.translate(this.x + this.width / 2, this.y);
+
+        // Flip character if facing left
+        if (this.direction === -1) {
+            ctx.scale(-1, 1);
+        }
 
         // Head
         ctx.fillStyle = this.color;
@@ -88,9 +176,11 @@ class Stickman {
         // Body
         ctx.fillRect(-5, 18, 10, 20);
 
-        // Arms (extended)
-        ctx.fillRect(-18, 20, 18, 5);
-        ctx.fillRect(0, 20, 18, 5);
+        // Arms
+        const armLength = this.isJumping ? 10 : 18;
+        const armOffsetY = this.isJumping ? 18 : 20;
+        ctx.fillRect(-armLength, armOffsetY, armLength, 5);
+        ctx.fillRect(0, armOffsetY, armLength, 5);
 
         // Legs
         ctx.fillRect(-5, 38, 5, 18);
@@ -98,13 +188,40 @@ class Stickman {
 
         ctx.restore();
     }
+
+    /**
+     * Get current state for debugging
+     */
+    getState() {
+        return {
+            position: { x: Math.round(this.x), y: Math.round(this.y) },
+            velocity: { x: this.velocityX.toFixed(2), y: this.velocityY.toFixed(2) },
+            grounded: this.grounded,
+            isJumping: this.isJumping,
+            direction: this.direction === 1 ? 'right' : 'left',
+        };
+    }
 }
 
-// Create player stickman
-const player = new Stickman(
-    ARENA.width / 2,
-    ARENA.groundY - STICKMAN.height
+// Create player
+const player = new Player(
+    ARENA.width / 2 - 15,
+    ARENA.groundY - 60
 );
+
+// ============================================================================
+// INPUT HANDLING
+// ============================================================================
+
+const keys = {};
+
+document.addEventListener('keydown', (e) => {
+    keys[e.key.toLowerCase()] = true;
+});
+
+document.addEventListener('keyup', (e) => {
+    keys[e.key.toLowerCase()] = false;
+});
 
 // ============================================================================
 // DRAWING FUNCTIONS
@@ -114,11 +231,7 @@ const player = new Stickman(
  * Draw the arena background
  */
 function drawBackground() {
-    // Sky
-    ctx.fillStyle = '#87ceeb';
-    ctx.fillRect(0, 0, GAME.width, ARENA.groundY);
-
-    // Gradient sky effect
+    // Gradient sky
     const gradient = ctx.createLinearGradient(0, 0, 0, ARENA.groundY);
     gradient.addColorStop(0, '#87ceeb');
     gradient.addColorStop(0.5, '#b0e0e6');
@@ -138,11 +251,11 @@ function drawGround() {
     ctx.fillStyle = '#8B7355';
     ctx.fillRect(0, groundY, GAME.width, groundHeight);
 
-    // Ground details
+    // Ground highlight
     ctx.fillStyle = '#A0826D';
     ctx.fillRect(0, groundY, GAME.width, 5);
 
-    // Grid pattern for visual interest
+    // Grid pattern
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.1)';
     ctx.lineWidth = 1;
     for (let i = 0; i < GAME.width; i += 100) {
@@ -173,33 +286,49 @@ function draw() {
     // Draw ground
     drawGround();
 
-    // Draw stickman
+    // Draw player
     player.draw(ctx);
 
-    // Draw FPS counter (optional debug info)
+    // Draw debug info
     drawDebugInfo();
 }
 
 /**
- * Draw debug information (FPS counter)
+ * Draw debug information
  */
 function drawDebugInfo() {
-    // FPS in top-right corner
+    // FPS counter
     ctx.fillStyle = '#00ff00';
     ctx.font = 'bold 12px Courier New';
     ctx.textAlign = 'right';
     ctx.fillText(`FPS: ${GAME.fps}`, GAME.width - 10, 20);
-}
 
-// ============================================================================
-// UPDATE FUNCTIONS
-// ============================================================================
+    // Player state
+    const state = player.getState();
+    ctx.fillStyle = '#00ff00';
+    ctx.font = '10px Courier New';
+    ctx.textAlign = 'left';
 
-/**
- * Update game state
- */
-function update() {
-    // Placeholder for future updates (movement, collision, etc.)
+    let debugY = 20;
+    ctx.fillText(`X: ${state.position.x}`, 10, debugY);
+    debugY += 14;
+    ctx.fillText(`Y: ${state.position.y}`, 10, debugY);
+    debugY += 14;
+    ctx.fillText(`VX: ${state.velocity.x}`, 10, debugY);
+    debugY += 14;
+    ctx.fillText(`VY: ${state.velocity.y}`, 10, debugY);
+    debugY += 14;
+    ctx.fillText(`Grounded: ${state.grounded}`, 10, debugY);
+    debugY += 14;
+    ctx.fillText(`Jumping: ${state.isJumping}`, 10, debugY);
+    debugY += 14;
+    ctx.fillText(`Direction: ${state.direction}`, 10, debugY);
+
+    // Controls info
+    ctx.fillStyle = '#ffff00';
+    ctx.font = '10px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('A/D or ← → : Move | W/↑/Space : Jump | F1: Toggle Debug', GAME.width / 2, GAME.height - 10);
 }
 
 // ============================================================================
@@ -215,7 +344,6 @@ let fpsUpdateTime = 0;
  */
 function gameLoop(timestamp) {
     if (!lastTimestamp) lastTimestamp = timestamp;
-    const deltaTime = (timestamp - lastTimestamp) / 1000; // Convert to seconds
     lastTimestamp = timestamp;
 
     // Update FPS counter every 500ms
@@ -227,8 +355,9 @@ function gameLoop(timestamp) {
     }
 
     // Game loop steps
-    update();       // Update game state
-    draw();         // Draw everything
+    player.handleInput(keys);  // Process input
+    player.update();            // Update physics
+    draw();                      // Render everything
 
     // Continue the loop
     requestAnimationFrame(gameLoop);
@@ -245,12 +374,15 @@ function init() {
     console.log('🎮 Naruto Stickman - Arena Fighter');
     console.log('Canvas Size:', GAME.width, 'x', GAME.height);
     console.log('Ground Level:', ARENA.groundY);
-    console.log('Stickman Position:', player.x, player.y);
+    console.log('Player Position:', player.x, player.y);
+    console.log('Controls: A/D or ← → to move, W/↑/Space to jump');
 
     // Hide loading screen
     setTimeout(() => {
         const loadingScreen = document.getElementById('loading-screen');
-        loadingScreen.classList.add('hidden');
+        if (loadingScreen) {
+            loadingScreen.classList.add('hidden');
+        }
     }, 500);
 
     // Start game loop
@@ -265,61 +397,26 @@ if (document.readyState === 'loading') {
 }
 
 // ============================================================================
-// KEYBOARD INPUT (Placeholder for future use)
-// ============================================================================
-
-const keys = {};
-
-document.addEventListener('keydown', (e) => {
-    keys[e.key.toLowerCase()] = true;
-});
-
-document.addEventListener('keyup', (e) => {
-    keys[e.key.toLowerCase()] = false;
-});
-
-// ============================================================================
 // UTILITY FUNCTIONS
 // ============================================================================
 
 /**
- * Get canvas center coordinates
+ * Toggle debug display
  */
-function getCanvasCenter() {
-    return {
-        x: GAME.width / 2,
-        y: GAME.height / 2,
-    };
+function toggleDebug() {
+    const canvas = document.getElementById('game-canvas');
+    canvas.dataset.debugMode = canvas.dataset.debugMode === 'true' ? 'false' : 'true';
 }
 
-/**
- * Toggle FPS counter display
- */
-function toggleFPSCounter() {
-    const fpsCounter = document.getElementById('fps-counter');
-    fpsCounter.style.display = fpsCounter.style.display === 'none' ? 'block' : 'none';
-}
-
-/**
- * Log game info to console
- */
-function logGameInfo() {
-    console.log({
-        canvasSize: `${GAME.width}x${GAME.height}`,
-        fps: GAME.fps,
-        playerPosition: { x: player.x, y: player.y },
-        arenaGroundLevel: ARENA.groundY,
-    });
-}
-
-// Keyboard shortcut to toggle FPS display (Press F1)
+// Keyboard shortcuts
 document.addEventListener('keydown', (e) => {
     if (e.key === 'F1') {
         e.preventDefault();
-        toggleFPSCounter();
+        toggleDebug();
+        console.log('Debug mode toggled');
     }
     if (e.key === 'F2') {
         e.preventDefault();
-        logGameInfo();
+        console.log('Player State:', player.getState());
     }
 });
